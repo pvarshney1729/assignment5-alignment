@@ -87,10 +87,9 @@ def run_sft_experiment(
     batch_size: int = 8,
     gradient_accumulation_steps: int = 4,
     num_epochs: int = 3,
-    eval_interval: int = 500,
-    save_dir: str = "/data/yourusername/sft_models",
+    save_dir: str = "/data/c-vprateek/sft_models",
     device_policy: str = "cuda:0",
-    device_vllm: str = "cuda:1",
+    device_vllm: str = "cuda:0",
     seed: int = 42
 ):
     
@@ -105,7 +104,11 @@ def run_sft_experiment(
     np.random.seed(seed)
     random.seed(seed)
 
-    experiment_name = f"sft_size_{dataset_size}_filter_{filter_correct}"
+    if dataset_size is None:
+        experiment_name = f"sft_full_filter_{filter_correct}"
+    else:
+        experiment_name = f"sft_size_{dataset_size}_filter_{filter_correct}"
+    
     wandb.init(
         project="cs336_alignment",
         name=experiment_name,
@@ -191,13 +194,40 @@ def run_sft_experiment(
     
     # Initialize vLLM for evaluation
     print("Initializing vLLM...")
-    vllm_model = init_vllm(model_path, device_vllm, seed)
+    # vllm_model = init_vllm(model_path, device_vllm, seed)
+    vllm_model = init_vllm(
+        model_id=model_path,
+        device=device_vllm,
+        seed=seed,
+        gpu_memory_utilization=0.2
+    )
     
     # Training loop
     print("Starting training...")
     eval_step = 0
-    global_step = 0
     
+    print("\nRunning initial evaluation before training...")
+    model.eval()
+    with torch.no_grad():
+        initial_eval_stats = evaluate_model(
+            policy_model=model,
+            vllm_model=vllm_model,
+            validation_data=validation_data,
+            tokenizer=tokenizer,
+            device=device_policy,
+            max_eval_examples=None
+        )
+    wandb.log({
+        "eval/accuracy": initial_eval_stats["accuracy_statistics"]["accuracy"],
+        "eval/format_accuracy": initial_eval_stats["accuracy_statistics"]["format_accuracy"],
+        "eval/avg_response_length": initial_eval_stats["length_statistics"].get("avg_length_all", 0),
+        "eval/avg_entropy": initial_eval_stats["entropy_statistics"].get("mean_entropy", 0),
+        "eval_step": eval_step
+    })
+    eval_step += 1
+    print(f"Initial Validation Accuracy: {initial_eval_stats['accuracy_statistics']['accuracy']:.3f}")
+
+
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch + 1}/{num_epochs}")
         
@@ -210,34 +240,36 @@ def run_sft_experiment(
             device=device_policy,
             gradient_accumulation_steps=gradient_accumulation_steps
         )
+
+        wandb.log({"train/epoch_loss": epoch_stats["average_loss"]})
         
         # Evaluate at intervals
-        if (epoch + 1) % max(1, num_epochs // 3) == 0:
-            print("\nRunning evaluation...")
-            model.eval()
-            with torch.no_grad():
-                eval_stats = evaluate_model(
-                    policy_model=model,
-                    vllm_model=vllm_model,
-                    validation_data=validation_data,
-                    tokenizer=tokenizer,
-                    device=device_policy,
-                    max_eval_examples=100
-                )
-            
-            # Log evaluation metrics
-            wandb.log({
-                "eval/accuracy": eval_stats["accuracy_statistics"]["accuracy"],
-                "eval/format_accuracy": eval_stats["accuracy_statistics"]["format_accuracy"],
-                "eval/avg_response_length": eval_stats["length_statistics"].get("avg_length_all", 0),
-                "eval/avg_entropy": eval_stats["entropy_statistics"].get("mean_entropy", 0),
-                "eval_step": eval_step
-            })
-            eval_step += 1
-            
-            print(f"Validation Accuracy: {eval_stats['accuracy_statistics']['accuracy']:.3f}")
-            print(f"Format Accuracy: {eval_stats['accuracy_statistics']['format_accuracy']:.3f}")
     
+        print("\nRunning evaluation...")
+        model.eval()
+        with torch.no_grad():
+            eval_stats = evaluate_model(
+                policy_model=model,
+                vllm_model=vllm_model,
+                validation_data=validation_data,
+                tokenizer=tokenizer,
+                device=device_policy,
+                max_eval_examples=512
+            )
+        
+        # Log evaluation metrics
+        wandb.log({
+            "eval/accuracy": eval_stats["accuracy_statistics"]["accuracy"],
+            "eval/format_accuracy": eval_stats["accuracy_statistics"]["format_accuracy"],
+            "eval/avg_response_length": eval_stats["length_statistics"].get("avg_length_all", 0),
+            "eval/avg_entropy": eval_stats["entropy_statistics"].get("mean_entropy", 0),
+            "eval_step": eval_step
+        })
+        eval_step += 1
+        
+        print(f"Validation Accuracy: {eval_stats['accuracy_statistics']['accuracy']:.3f}")
+        print(f"Format Accuracy: {eval_stats['accuracy_statistics']['format_accuracy']:.3f}")
+
     # Save final model
     output_dir = os.path.join(save_dir, experiment_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -255,7 +287,7 @@ def run_sft_experiment(
             validation_data=validation_data,
             tokenizer=tokenizer,
             device=device_policy,
-            max_eval_examples=200
+            max_eval_examples=None
         )
     
     final_accuracy = final_eval_stats["accuracy_statistics"]["accuracy"]
@@ -281,7 +313,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
     parser.add_argument("--num_epochs", type=int, default=3, help="Number of epochs")
-    parser.add_argument("--save_dir", type=str, default="/data/yourusername/sft_models", help="Save directory")
+    parser.add_argument("--save_dir", type=str, default="/data/c-vprateek/sft_models", help="Save directory")
     
     args = parser.parse_args()
     

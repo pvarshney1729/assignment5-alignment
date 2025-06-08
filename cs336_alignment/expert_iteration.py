@@ -157,7 +157,7 @@ def run_expert_iteration_experiment(
     batch_size_sft: int = 8,
     gradient_accumulation_steps: int = 4,
     device_policy: str = "cuda:0",
-    device_vllm: str = "cuda:1",
+    device_vllm: str = "cuda:0",
     seed: int = 42,
     save_dir: str = "/data/c-vprateek/expert_iteration_models",
 ):
@@ -173,7 +173,7 @@ def run_expert_iteration_experiment(
     np.random.seed(seed)
     random.seed(seed)
 
-    experiment_name = f"batch_size_{batch_size_rollouts}_expert_iteration_rollouts_{num_rollouts}_epochs_{num_epochs_per_step}"
+    experiment_name = f"expert_iteration_batch_size_{batch_size_rollouts}_rollouts_{num_rollouts}_epochs_{num_epochs_per_step}"
     wandb.init(
         project="cs336_alignment",
         name=experiment_name,
@@ -217,7 +217,7 @@ def run_expert_iteration_experiment(
         prompt_template = f.read()
 
     print("Initializing vLLM...")
-    vllm_model = init_vllm(model_path, device_vllm, seed, gpu_memory_utilization=0.7)
+    vllm_model = init_vllm(model_path, device_vllm, seed, gpu_memory_utilization=0.2)
 
     print("Initial evaluation...")
     policy_model.eval()
@@ -228,7 +228,7 @@ def run_expert_iteration_experiment(
             validation_data=validation_data,
             tokenizer=tokenizer,
             device=device_policy,
-            max_eval_examples=100
+            max_eval_examples=512
         )
     
     print(f"Initial validation accuracy: {initial_eval['accuracy_statistics']['accuracy']:.3f}")
@@ -265,6 +265,8 @@ def run_expert_iteration_experiment(
             seed=seed+expiter_step,
         )
 
+        print("Releasing VLLM to free memory for SFT...")
+        del vllm_model
         torch.cuda.empty_cache()
 
         print("Filtering correct rollouts...")
@@ -296,6 +298,11 @@ def run_expert_iteration_experiment(
 
         torch.cuda.empty_cache()
 
+        print("Re-initializing VLLM for evaluation...")
+        vllm_model = init_vllm(model_path, device_vllm, seed, gpu_memory_utilization=0.7)
+
+        torch.cuda.empty_cache()
+
         print("Evaluating updated policy...")
         policy_model.eval()
         with torch.no_grad():
@@ -305,7 +312,7 @@ def run_expert_iteration_experiment(
                 validation_data=validation_data,
                 tokenizer=tokenizer,
                 device=device_policy,
-                max_eval_examples=100
+                max_eval_examples=512
             )
         
         current_accuracy = eval_stats["accuracy_statistics"]["accuracy"]
@@ -335,6 +342,7 @@ def run_expert_iteration_experiment(
             validation_data=validation_data,
             tokenizer=tokenizer,
             device=device_policy,
+            max_eval_examples=None
         )
 
     final_accuracy = final_eval["accuracy_statistics"]["accuracy"]
@@ -368,7 +376,7 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=5e-5, help="Learning rate for SFT steps")
     parser.add_argument("--batch_size_sft", type=int, default=8, help="Batch size for SFT")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Gradient accumulation steps")
-    parser.add_argument("--save_dir", type=str, default="/data/yourusername/ei_models", help="Save directory")
+    parser.add_argument("--save_dir", type=str, default="/data/c-vprateek/ei_models", help="Save directory")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     args = parser.parse_args()
@@ -380,8 +388,10 @@ def main():
             for epochs in args.epoch_configs:
                 config_name = f"batch_size_{batch_size}_rollouts_{rollouts}_epochs_{epochs}"
                 print(f"\n{'='*100}")
-                print(f"Running Expert Iteration: {rollouts} rollouts, {epochs} epochs per step")
+                print(f"Running Expert Iteration: batch_size {batch_size}, {rollouts} rollouts, {epochs} epochs per step")
                 print('='*80)
+
+                save_directory = args.save_dir + f"/batch_size_{batch_size}_rollouts_{rollouts}_epochs_{epochs}"
 
                 accuracy = run_expert_iteration_experiment(
                     num_rollouts=rollouts,
@@ -391,7 +401,7 @@ def main():
                     learning_rate = args.learning_rate,
                     batch_size_sft = args.batch_size_sft,
                     gradient_accumulation_steps = args.gradient_accumulation_steps,
-                    save_dir = args.save_dir,
+                    save_dir = save_directory,
                     seed = args.seed,
                 )
 

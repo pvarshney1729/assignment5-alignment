@@ -40,6 +40,8 @@ def evaluate_model(
     validation_data: List[Dict[str, Any]],
     tokenizer,
     device: str,
+    prompt_template: str,
+    reward_function,
     max_eval_examples: Optional[int] = None
 ) -> Dict[str, float]:
     
@@ -50,9 +52,6 @@ def evaluate_model(
     print(f"Evaluating on {num_examples_to_eval} examples...")
 
     load_policy_into_vllm_instance(policy_model, vllm_model)
-
-    with open("cs336_alignment/prompts/r1_zero.prompt", 'r') as f:
-        prompt_template = f.read()
 
     eval_examples = validation_data[:num_examples_to_eval]
     prompts = [prompt_template.format(question=ex['problem']) for ex in eval_examples]
@@ -70,7 +69,7 @@ def evaluate_model(
         model=vllm_model,
         prompts=prompts,
         ground_truths=ground_truths,
-        reward_function=r1_zero_reward_fn,
+        reward_function=reward_function,
         tokenizer=tokenizer,
         sampling_params=sampling_params,
         max_examples=num_examples_to_eval,

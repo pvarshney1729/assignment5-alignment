@@ -105,7 +105,7 @@ echo "PHASE 2: Starting Focused Hyperparameter Sweep..."
 
 # --- Focused Sweep Configuration ---
 FOCUSED_EPOCHS_SWEEP=(2) 
-FOCUSED_TBS_SWEEP=(64)   
+FOCUSED_TBS_SWEEP=(32)   
 
 for epochs in "${FOCUSED_EPOCHS_SWEEP[@]}"; do
     for tbs in "${FOCUSED_TBS_SWEEP[@]}"; do
@@ -123,8 +123,6 @@ for epochs in "${FOCUSED_EPOCHS_SWEEP[@]}"; do
     "train_batch_size": ${tbs},
     "gradient_accumulation_steps": ${grad_accum},
     "loss_type": "grpo_clip",
-    "eval_every": 10,
-    "log_every": 1,
     "cliprange": 0.2,
     "use_std_normalization": false,
     "seed": 42,
@@ -137,8 +135,8 @@ for epochs in "${FOCUSED_EPOCHS_SWEEP[@]}"; do
     "sampling_max_tokens": 1024,
     "gpu_memory_utilization": 0.2,
     "grad_clip_value": 1.0,
-    "log_every": 2,
-    "eval_every": 2,
+    "log_every": 5,
+    "eval_every": 5,
     "eval_batch_size": 512,
     "model_path": "/data/a5-alignment/models/Qwen2.5-Math-1.5B",
     "dataset_path": "/data/a5-alignment/MATH/train.jsonl",
